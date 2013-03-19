@@ -40,9 +40,9 @@ using namespace std;
 
 struct Exp;
 struct Context {
-   Context(const string& n, int v) : name(n), value(v) { }
+   Context(const string& n, const Exp* v) : name(n), value(v) { }
    string name;
-   int value;
+   oo::shared_ptr<const Exp> value;
 };
 
 // Базовый класс для всех выражений языка
@@ -55,12 +55,36 @@ struct Exp {
 
    // default: return false, specialized: true
    virtual bool isSimplistic() const { return false; }
+   virtual bool isSkip() const { return false; }
 
    // getters: уродливые, но лучше чем ничего, not to be called directly:
    virtual int	getInt()  const { assert(false); }
    virtual bool getBool() const { assert(false); }
 
    virtual ~Exp() { }
+};
+
+//======================================================================
+class Bool : public Exp {
+   bool b_;
+public:
+   Bool(bool b) : b_(b) { }
+
+   bool isSimplistic() const { return true; }
+   bool getBool() const { return b_; }
+
+   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   {
+      assert(false); // Not to be evaluated explicitly
+      return oo::shared_ptr<const Exp>();
+   }
+
+   void print() const
+   {
+      cout <<  "(Bool " << b_ << ")";
+   }
+
+   ~Bool() { }
 };
 
 //======================================================================
@@ -101,7 +125,7 @@ public:
       if (it == c.end())
 	 throw logic_error("Unbound variable name!");
 
-      return oo::shared_ptr<const Exp>(new Int(it->value));
+      return it->value;
    }
 
    void print() const
@@ -114,7 +138,8 @@ public:
 
 //======================================================================
 //assert(e1->getInt() == (e1.get() ->* &Exp::getInt)());
-template<typename Operation, typename ValueAccessor, const char* OpString>
+template<typename Operation, typename RetType, typename ValueAccessor,
+						const char* OpString>
 class Binop : public Exp {
    oo::shared_ptr<const Exp> e1_;
    oo::shared_ptr<const Exp> e2_;
@@ -130,8 +155,8 @@ public:
    oo::shared_ptr<const Exp> eval(vector<Context>& c) const
    {
       if (e1_->isSimplistic() && e2_->isSimplistic())
-	 return oo::shared_ptr<const Exp>(new Int(op(va(e1_.get()),
-						     va(e2_.get()))));
+	 return oo::shared_ptr<const Exp>(new RetType(op(va(e1_.get()),
+							 va(e2_.get()))));
 
       if (e1_->isSimplistic())
 	 return oo::shared_ptr<const Exp>
@@ -151,7 +176,87 @@ public:
 };
 
 //======================================================================
-struct IntValueAccessor { // bind it???
+class If : public Exp {
+   oo::shared_ptr<const Exp> cond_;
+   oo::shared_ptr<const Exp> true_;
+   oo::shared_ptr<const Exp> false_;
+
+public:
+   If(const Exp* c, const Exp* t, const Exp* f) :
+      cond_(c), true_(t), false_(f) { }
+
+   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   {
+      oo::shared_ptr<const Exp> cond = cond_;
+      oo::shared_ptr<const Exp> _true = true_;
+      oo::shared_ptr<const Exp> _false = false_;
+
+      for (; !cond->isSimplistic(); cond = cond->eval(c));
+      for (; !_true->isSimplistic(); _true = _true->eval(c));
+      for (; !_false->isSimplistic(); _false = _false->eval(c));
+
+      // @todo: _true and _false may be evaluated lazily
+      return cond->getBool() ? _true : _false;
+   }
+
+   void print() const
+   {
+      cout << "(If "; cond_->print(); cout << ","; true_->print();  cout << ",";
+						   false_->print(); cout << ")";
+   }
+
+   ~If() { }
+};
+
+//======================================================================
+class Skip : public Exp {
+public:
+   Skip() { }
+
+   bool isSimplistic() const { return true; }
+   bool isSkip()       const { return true; }
+
+   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   {
+      assert(false); // Not to be evaluated explicitly
+      return oo::shared_ptr<const Exp>();
+   }
+
+   void print() const { cout <<  "(Skip)"; }
+
+   ~Skip() { }
+};
+
+//======================================================================
+class Seq : public Exp {
+   oo::shared_ptr<const Exp> e1_;
+   oo::shared_ptr<const Exp> e2_;
+   Seq(oo::shared_ptr<const Exp> e1, oo::shared_ptr<const Exp> e2)
+      : e1_(e1), e2_(e2) { }
+public:
+   Seq(const Exp* e1, const Exp* e2) : e1_(e1), e2_(e2) { }
+
+   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   {
+      if (e1_->isSkip())
+	 return e2_;
+
+      oo::shared_ptr<const Exp> e1 = e1_;
+      for (; !e1->isSimplistic(); e1 = e1->eval(c));
+
+      return oo::shared_ptr<const Exp>(new Seq(e1, e2_));
+   }
+
+   void print() const
+   {
+      cout <<  "(Seq "; e1_->print(); cout << ","; e2_->print(); cout <<")";
+   }
+
+   ~Seq() { }
+};
+
+//======================================================================
+struct IntValueAccessor { // @todo: bind it???
    int operator()(const Exp* e) const { return e->getInt(); }
 };
 
@@ -160,32 +265,44 @@ extern const char __extern_Minus[] = "Minus";
 extern const char __extern_Times[] = "Times";
 extern const char __extern_Divide[] = "Divide";
 
-typedef Binop<plus<int>, IntValueAccessor, __extern_Plus> Plus;
-typedef Binop<minus<int>, IntValueAccessor, __extern_Minus> Minus;
-typedef Binop<multiplies<int>, IntValueAccessor, __extern_Times> Times;
-typedef Binop<divides<int>, IntValueAccessor, __extern_Divide> Divide;
+typedef Binop<plus<int>,       Int, IntValueAccessor, __extern_Plus>  Plus;
+typedef Binop<minus<int>,      Int, IntValueAccessor, __extern_Minus> Minus;
+typedef Binop<multiplies<int>, Int, IntValueAccessor, __extern_Times> Times;
+typedef Binop<divides<int>,    Int, IntValueAccessor, __extern_Divide> Divide;
+
+extern const char __extern_Less[] = "Less";
+extern const char __extern_Equal[] = "Equal";
+
+typedef Binop<less<int>,     Bool, IntValueAccessor, __extern_Less> Less;
+typedef Binop<equal_to<int>, Bool, IntValueAccessor, __extern_Equal> Equal;
 
 //======================================================================
 int main()
 {
    try {
       vector<Context> c;
-      oo::shared_ptr<const Exp> e0(new Var("a"));
-      oo::shared_ptr<const Exp> e1(new Divide(new Times(new Minus(new Var("a"),
-								  new Int(10)),
-							new Plus(new Var("b"),
-								 new Int(1))),
-					      new Int(4)));
+      oo::shared_ptr<const Exp> e(new Less(new Var("c"),
+					   new Times(new Minus(new Var("a"),
+							       new Int(10)),
+						     new Plus(new Var("b"),
+							      new Int(1)))));
+      c.push_back(Context("a", new Int(12)));
+      c.push_back(Context("b", new Int(31)));
+      c.push_back(Context("c", new If(new Less(new Var("a"),
+					       new Var("b")),
+				  new Int(444),
+				  new Int(4))));
 
-      c.push_back(Context("a", 12));
-      c.push_back(Context("b", 31));
+      e->print(); cout << "\n";
 
-      e0->print();		cout << "\n";
-      e1->print();		cout << "\n";
-      e0->eval(c)->print();	cout << "\n";
+      for (int i = 0; i < c.size(); ++i) {
+	 cout << "Var " << c[i].name << " = ";
+	 c[i].value->print(); cout << "\n";
+      }
 
-      for (; !e1->isSimplistic(); e1 = e1->eval(c));
-      e1->print();		cout << "\n";
+      for (; !e->isSimplistic(); e = e->eval(c));
+      e->print(); cout << "\n";
+
    } catch (exception& e) {
       cout << e.what()	<< '\n';
       return 1;
