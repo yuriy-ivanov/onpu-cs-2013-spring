@@ -41,18 +41,20 @@
 namespace oo = boost;
 using namespace std;
 
-struct Exp;
-class While;
+struct Exp;  // fwd
+typedef oo::shared_ptr<const Exp> PCExp;
+
+// Куча
 struct Context {
    Context(const string& n, const Exp* v) : name(n), value(v) { }
    string name;
-   oo::shared_ptr<const Exp> value;
+   PCExp value;
 };
 
 // Базовый класс для всех выражений языка
 struct Exp {
    // Однашаговая редукция выражения
-   virtual oo::shared_ptr<const Exp> eval(vector<Context>& c) const = 0;
+   virtual PCExp eval(vector<Context>& c) const = 0;
 
    // Печать текущего выражения
    virtual void print() const = 0;
@@ -66,9 +68,6 @@ struct Exp {
    virtual bool getBool() const { assert(false); }
 
    virtual ~Exp() { }
-
-   //
-   typedef int XXX;
 };
 
 //======================================================================
@@ -80,10 +79,10 @@ public:
    bool isSimplistic() const { return true; }
    bool getBool() const { return b_; }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       assert(false); // Not to be evaluated explicitly
-      return oo::shared_ptr<const Exp>();
+      return PCExp();
    }
 
    void print() const
@@ -103,10 +102,10 @@ public:
    bool isSimplistic() const { return true; }
    int getInt() const { return i_; }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       assert(false); // Not to be evaluated explicitly
-      return oo::shared_ptr<const Exp>();
+      return PCExp();
    }
 
    void print() const
@@ -123,7 +122,7 @@ class Var : public Exp {
 public:
    Var(string name) : name_ (name) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       vector<Context>::iterator it =
 	 find_if(c.begin(), c.end(), oo::bind(&Context::name, _1) == name_);
@@ -153,30 +152,27 @@ class Binop : public Exp {
       > BinopConstraints;
    BOOST_STATIC_ASSERT((oo::mpl::has_key<BinopConstraints,
 			pair<Operation, RetType> >::value));
-
-   oo::shared_ptr<const Exp> e1_;
-   oo::shared_ptr<const Exp> e2_;
    ValueAccessor va;
    Operation op;
+   PCExp e1_;
+   PCExp e2_;
 
    // Кривизна, но что делать??? Следующий компиллер на С++ будет красивее...
-   Binop(oo::shared_ptr<const Exp> e1,
-	 oo::shared_ptr<const Exp> e2) : e1_(e1), e2_(e2) { }
+   Binop(PCExp e1, PCExp e2) : e1_(e1), e2_(e2) { }
 public:
    Binop(const Exp* e1, const Exp* e2) : e1_(e1), e2_(e2) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       if (e1_->isSimplistic() && e2_->isSimplistic())
-	 return oo::shared_ptr<const Exp>(new RetType(op(va(e1_.get()),
-							 va(e2_.get()))));
+	 return PCExp(new RetType(op(va(e1_.get()),
+				     va(e2_.get()))));
 
       if (e1_->isSimplistic())
-	 return oo::shared_ptr<const Exp>
-	    (new Binop (oo::shared_ptr<const Exp>(new Int(va(e1_.get()))),
-			e2_->eval(c)));
+	 return PCExp(new Binop(PCExp(new Int(va(e1_.get()))),
+				e2_->eval(c)));
 
-      return oo::shared_ptr<const Exp>(new Binop(e1_->eval(c), e2_));
+      return PCExp(new Binop(e1_->eval(c), e2_));
    }
 
    void print() const
@@ -189,23 +185,23 @@ public:
 };
 
 //======================================================================
+class While; // fwd
 class If : public Exp {
-   oo::shared_ptr<const Exp> cond_;
-   oo::shared_ptr<const Exp> true_;
-   oo::shared_ptr<const Exp> false_;
+   PCExp cond_;
+   PCExp true_;
+   PCExp false_;
 
-   If(oo::shared_ptr<const Exp> c, oo::shared_ptr<const Exp> t,
-      oo::shared_ptr<const Exp> f) : cond_(c), true_(t), false_(f) { }
+   If(PCExp c, PCExp t, PCExp f) : cond_(c), true_(t), false_(f) { }
    friend class While; // ugly? why???
 public:
    If(const Exp* c, const Exp* t, const Exp* f) :
       cond_(c), true_(t), false_(f) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
-      oo::shared_ptr<const Exp> cond = cond_;
-      oo::shared_ptr<const Exp> _true = true_;
-      oo::shared_ptr<const Exp> _false = false_;
+      PCExp cond = cond_;
+      PCExp _true = true_;
+      PCExp _false = false_;
 
       for (; !cond->isSimplistic(); cond = cond->eval(c));
 
@@ -235,10 +231,10 @@ public:
    bool isSimplistic() const { return true; }
    bool isSkip()       const { return true; }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       assert(false); // Not to be evaluated explicitly
-      return oo::shared_ptr<const Exp>();
+      return PCExp();
    }
 
    void print() const { cout <<  "(Skip)"; }
@@ -248,25 +244,24 @@ public:
 
 //======================================================================
 class Seq : public Exp {
-   oo::shared_ptr<const Exp> e1_;
-   oo::shared_ptr<const Exp> e2_;
-   Seq(oo::shared_ptr<const Exp> e1,
-       oo::shared_ptr<const Exp> e2) : e1_(e1), e2_(e2) { }
+   PCExp e1_;
+   PCExp e2_;
+   Seq(PCExp e1, PCExp e2) : e1_(e1), e2_(e2) { }
    friend class While; // ugly? maybe...
 public:
    Seq(const Exp* e1, const Exp* e2) : e1_(e1), e2_(e2) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       // @todo: think about to remove isSkip() from the code, is this just the
       // same as isSimplistic()??? isSimplistic() is XXX, isn't it???
       if (e1_->isSkip() || e1_->isSimplistic())
 	 return e2_;
 
-      oo::shared_ptr<const Exp> e1 = e1_;
+      PCExp e1 = e1_;
       for (; !e1->isSimplistic(); e1 = e1->eval(c));
 
-      return oo::shared_ptr<const Exp>(new Seq(e1, e2_));
+      return PCExp(new Seq(e1, e2_));
    }
 
    void print() const
@@ -279,22 +274,20 @@ public:
 
 //======================================================================
 class While : public Exp {
-   oo::shared_ptr<const Exp> e_; // condition
-   oo::shared_ptr<const Exp> b_; // body
-   While(oo::shared_ptr<const Exp> e,
-	 oo::shared_ptr<const Exp> b) : e_(e), b_(b) { }
+   PCExp e_; // condition
+   PCExp b_; // body
+   While(PCExp e, PCExp b) : e_(e), b_(b) { }
 public:
    While(const Exp* e, const Exp* b) : e_(e), b_(b) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
-      typedef oo::shared_ptr<const Exp> SExp;
       // let rec interp_s (s:exp) = function
       // While(e,s1) -> If(e, Seq(s1,s), Skip)
-      SExp skip(new Skip());
-      SExp seq (new Seq(b_, SExp(new While(e_, b_))));
+      PCExp skip(new Skip());
+      PCExp seq (new Seq(b_, PCExp(new While(e_, b_))));
 
-      return SExp(new If(e_, seq, skip));
+      return PCExp(new If(e_, seq, skip));
    }
 
    void print() const
@@ -308,13 +301,13 @@ public:
 //======================================================================
 class Assign : public Exp {
    string name_;
-   oo::shared_ptr<const Exp> e_;
-   Assign(const string& name, oo::shared_ptr<const Exp> e)
+   PCExp e_;
+   Assign(const string& name, PCExp e)
       : name_(name), e_(e) { }
 public:
    Assign(const string& name, const Exp* e) : name_(name), e_(e) { }
 
-   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   PCExp eval(vector<Context>& c) const
    {
       if (e_->isSimplistic()) {
 	 vector<Context>::iterator it =
@@ -324,12 +317,12 @@ public:
 	    throw logic_error("Unbound variable name!"); // @todo: push back var
 
 	 it->value = e_;
-	 return oo::shared_ptr<const Exp>(new Skip());
+	 return PCExp(new Skip());
       }
 
-      oo::shared_ptr<const Exp> e = e_;
+      PCExp e = e_;
       for (; !e->isSimplistic(); e = e->eval(c));
-      return oo::shared_ptr<const Exp>(new Assign(name_, e));
+      return PCExp(new Assign(name_, e));
    }
 
    void print() const
@@ -364,7 +357,7 @@ int main()
 {
    try {
       vector<Context> c;
-      oo::shared_ptr<const Exp>
+      PCExp
 	 // 1
 	 e(new Seq(new While(new Less(new Var("d"), new Int(5)),
 			     new Assign("d", new Int(10))),
@@ -393,8 +386,7 @@ int main()
 	 c[i].value->print(); cout << "\n";
       }
 
-      for (; !e->isSimplistic(); ) {
-	 e = e->eval(c);
+      for (; !e->isSimplistic(); e = e->eval(c)) {
 	 cout << ":::::"; e->print(); cout << "\n";
       }
       e->print(); cout << "\n";
