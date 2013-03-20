@@ -66,6 +66,9 @@ struct Exp {
    virtual bool getBool() const { assert(false); }
 
    virtual ~Exp() { }
+
+   //
+   typedef int XXX;
 };
 
 //======================================================================
@@ -205,10 +208,13 @@ public:
       oo::shared_ptr<const Exp> _false = false_;
 
       for (; !cond->isSimplistic(); cond = cond->eval(c));
-      for (; !_true->isSimplistic(); _true = _true->eval(c));
-      for (; !_false->isSimplistic(); _false = _false->eval(c));
 
-      // @todo: _true and _false may be evaluated lazily
+      // The following strange looking construct makes things lazy
+      if (cond->getBool())
+	 for (; !_true->isSimplistic(); _true = _true->eval(c));
+      else
+	 for (; !_false->isSimplistic(); _false = _false->eval(c));
+
       return cond->getBool() ? _true : _false;
    }
 
@@ -282,13 +288,13 @@ public:
 
    oo::shared_ptr<const Exp> eval(vector<Context>& c) const
    {
+      typedef oo::shared_ptr<const Exp> SExp;
       // let rec interp_s (s:exp) = function
       // While(e,s1) -> If(e, Seq(s1,s), Skip)
-      oo::shared_ptr<const Exp> skip (new Skip());
-      oo::shared_ptr<const Exp> seq
-	 (new Seq(b_, oo::shared_ptr<const Exp>(new While(e_, b_))));
+      SExp skip(new Skip());
+      SExp seq (new Seq(b_, SExp(new While(e_, b_))));
 
-      return oo::shared_ptr<const Exp>(new If(e_, seq, skip));
+      return SExp(new If(e_, seq, skip));
    }
 
    void print() const
@@ -359,13 +365,18 @@ int main()
    try {
       vector<Context> c;
       oo::shared_ptr<const Exp>
-	 e(new Seq(new Less(new Var("c"),
-			    new Times(new Minus(new Var("a"),
-						new Int(10)),
-				      new Plus(new Var("b"),
-					       new Int(1)))),
-		   new Seq(new Assign("d", new Int(10)),
-			   new Var("d"))));
+	 // 1
+	 e(new Seq(new While(new Less(new Var("d"), new Int(5)),
+			     new Assign("d", new Int(10))),
+		   new Var("d")));
+	 // 2
+	 // e(new Seq(new Less(new Var("c"),
+	 // 		    new Times(new Minus(new Var("a"),
+	 // 					new Int(10)),
+	 // 			      new Plus(new Var("b"),
+	 // 				       new Int(1)))),
+	 // 	   new Seq(new Assign("d", new Int(10)),
+	 // 		   new Var("d"))));
 
       c.push_back(Context("a", new Int(12)));
       c.push_back(Context("b", new Int(31)));
@@ -382,7 +393,8 @@ int main()
 	 c[i].value->print(); cout << "\n";
       }
 
-      for (; !e->isSimplistic(); e = e->eval(c)) {
+      for (; !e->isSimplistic(); ) {
+	 e = e->eval(c);
 	 cout << ":::::"; e->print(); cout << "\n";
       }
       e->print(); cout << "\n";
