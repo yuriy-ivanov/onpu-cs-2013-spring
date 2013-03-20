@@ -42,6 +42,7 @@ namespace oo = boost;
 using namespace std;
 
 struct Exp;
+class While;
 struct Context {
    Context(const string& n, const Exp* v) : name(n), value(v) { }
    string name;
@@ -142,7 +143,7 @@ public:
 template<typename Operation, typename RetType, typename ValueAccessor,
 						const char* OpString>
 class Binop : public Exp {
-   // Available types for RetType in `class Binop'
+   // Available types for (Operation, RetType) in `class Binop'
    typedef oo::mpl::set<
       pair<plus<int>,Int>,   pair<multiplies<int>,Int>, pair<minus<int>,Int>,
       pair<divides<int>,Int>, pair<less<int>,Bool>,     pair<equal_to<int>,Bool>
@@ -189,6 +190,10 @@ class If : public Exp {
    oo::shared_ptr<const Exp> cond_;
    oo::shared_ptr<const Exp> true_;
    oo::shared_ptr<const Exp> false_;
+
+   If(oo::shared_ptr<const Exp> c, oo::shared_ptr<const Exp> t,
+      oo::shared_ptr<const Exp> f) : cond_(c), true_(t), false_(f) { }
+   friend class While; // ugly? why???
 public:
    If(const Exp* c, const Exp* t, const Exp* f) :
       cond_(c), true_(t), false_(f) { }
@@ -241,6 +246,7 @@ class Seq : public Exp {
    oo::shared_ptr<const Exp> e2_;
    Seq(oo::shared_ptr<const Exp> e1,
        oo::shared_ptr<const Exp> e2) : e1_(e1), e2_(e2) { }
+   friend class While; // ugly? maybe...
 public:
    Seq(const Exp* e1, const Exp* e2) : e1_(e1), e2_(e2) { }
 
@@ -263,6 +269,34 @@ public:
    }
 
    ~Seq() { }
+};
+
+//======================================================================
+class While : public Exp {
+   oo::shared_ptr<const Exp> e_; // condition
+   oo::shared_ptr<const Exp> b_; // body
+   While(oo::shared_ptr<const Exp> e,
+	 oo::shared_ptr<const Exp> b) : e_(e), b_(b) { }
+public:
+   While(const Exp* e, const Exp* b) : e_(e), b_(b) { }
+
+   oo::shared_ptr<const Exp> eval(vector<Context>& c) const
+   {
+      // let rec interp_s (s:exp) = function
+      // While(e,s1) -> If(e, Seq(s1,s), Skip)
+      oo::shared_ptr<const Exp> skip (new Skip());
+      oo::shared_ptr<const Exp> seq
+	 (new Seq(b_, oo::shared_ptr<const Exp>(new While(e_, b_))));
+
+      return oo::shared_ptr<const Exp>(new If(e_, seq, skip));
+   }
+
+   void print() const
+   {
+      cout <<  "(While "; e_->print(); cout << ","; b_->print(); cout <<")";
+   }
+
+   ~While() { }
 };
 
 //======================================================================
@@ -305,12 +339,12 @@ struct IntValueAccessor { // @todo: bind it???
    int operator()(const Exp* e) const { return e->getInt(); }
 };
 
-extern const char __extern_Plus[] = "Plus";
-extern const char __extern_Minus[] = "Minus";
-extern const char __extern_Times[] = "Times";
+extern const char __extern_Plus[]   = "Plus";
+extern const char __extern_Minus[]  = "Minus";
+extern const char __extern_Times[]  = "Times";
 extern const char __extern_Divide[] = "Divide";
-extern const char __extern_Less[] = "Less";
-extern const char __extern_Equal[] = "Equal";
+extern const char __extern_Less[]   = "Less";
+extern const char __extern_Equal[]  = "Equal";
 
 typedef Binop<plus<int>,       Int,  IntValueAccessor, __extern_Plus>   Plus;
 typedef Binop<minus<int>,      Int,  IntValueAccessor, __extern_Minus>  Minus;
@@ -336,8 +370,8 @@ int main()
       c.push_back(Context("a", new Int(12)));
       c.push_back(Context("b", new Int(31)));
       c.push_back(Context("c", new If(new Less(new Var("a"),
-						       new Var("b")),
-					      new Int(444),
+					       new Var("b")),
+				      new Int(444),
 				      new Int(4))));
       c.push_back(Context("d", new Int(0)));
 
