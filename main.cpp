@@ -1,3 +1,4 @@
+#include <map>
 #include <vector>
 #include <string>
 #include <cassert>
@@ -43,6 +44,7 @@ using namespace std;
 
 struct Exp;  // fwd
 typedef oo::shared_ptr<const Exp> PCExp;
+typedef map<string, PCExp> Heap;
 
 // Куча
 struct Context {
@@ -50,6 +52,18 @@ struct Context {
    string name;
    PCExp value;
 };
+
+// Утилиты
+typedef vector<Context>::iterator VCIt;
+static VCIt lookup(vector<Context>& c, const string& name)
+{
+   VCIt it = find_if(c.begin(), c.end(), oo::bind(&Context::name, _1) == name);
+
+   if (it == c.end())
+      throw logic_error("Variable with given name not found!");
+
+   return it;
+}
 
 // Базовый класс для всех выражений языка
 struct Exp {
@@ -120,17 +134,11 @@ public:
 class Var : public Exp {
    string name_;
 public:
-   Var(string name) : name_ (name) { }
+   Var(const string& name) : name_ (name) { }
 
    PCExp eval(vector<Context>& c) const
    {
-      vector<Context>::iterator it =
-	 find_if(c.begin(), c.end(), oo::bind(&Context::name, _1) == name_);
-
-      if (it == c.end())
-	 throw logic_error("Unbound variable name!");
-
-      return it->value;
+      return lookup(c, name_)->value;
    }
 
    void print() const
@@ -165,12 +173,10 @@ public:
    PCExp eval(vector<Context>& c) const
    {
       if (e1_->isSimplistic() && e2_->isSimplistic())
-	 return PCExp(new RetType(op(va(e1_.get()),
-				     va(e2_.get()))));
+	 return PCExp(new RetType(op(va(e1_.get()), va(e2_.get()))));
 
       if (e1_->isSimplistic())
-	 return PCExp(new Binop(PCExp(new Int(va(e1_.get()))),
-				e2_->eval(c)));
+	 return PCExp(new Binop(PCExp(new Int(va(e1_.get()))), e2_->eval(c)));
 
       return PCExp(new Binop(e1_->eval(c), e2_));
    }
@@ -185,14 +191,13 @@ public:
 };
 
 //======================================================================
-class While; // fwd
 class If : public Exp {
    PCExp cond_;
    PCExp true_;
    PCExp false_;
+   friend class While; // ugly? why???
 
    If(PCExp c, PCExp t, PCExp f) : cond_(c), true_(t), false_(f) { }
-   friend class While; // ugly? why???
 public:
    If(const Exp* c, const Exp* t, const Exp* f) :
       cond_(c), true_(t), false_(f) { }
@@ -246,8 +251,9 @@ public:
 class Seq : public Exp {
    PCExp e1_;
    PCExp e2_;
-   Seq(PCExp e1, PCExp e2) : e1_(e1), e2_(e2) { }
    friend class While; // ugly? maybe...
+
+   Seq(PCExp e1, PCExp e2) : e1_(e1), e2_(e2) { }
 public:
    Seq(const Exp* e1, const Exp* e2) : e1_(e1), e2_(e2) { }
 
@@ -310,13 +316,7 @@ public:
    PCExp eval(vector<Context>& c) const
    {
       if (e_->isSimplistic()) {
-	 vector<Context>::iterator it =
-	    find_if(c.begin(), c.end(), oo::bind(&Context::name, _1) == name_);
-
-	 if (it == c.end())
-	    throw logic_error("Unbound variable name!"); // @todo: push back var
-
-	 it->value = e_;
+	 lookup(c, name_)->value = e_;
 	 return PCExp(new Skip());
       }
 
@@ -338,12 +338,12 @@ struct IntValueAccessor { // @todo: bind it???
    int operator()(const Exp* e) const { return e->getInt(); }
 };
 
-extern const char __extern_Plus[]   = "Plus";
-extern const char __extern_Minus[]  = "Minus";
-extern const char __extern_Times[]  = "Times";
+extern const char __extern_Plus  [] = "Plus";
+extern const char __extern_Minus [] = "Minus";
+extern const char __extern_Times [] = "Times";
 extern const char __extern_Divide[] = "Divide";
-extern const char __extern_Less[]   = "Less";
-extern const char __extern_Equal[]  = "Equal";
+extern const char __extern_Less  [] = "Less";
+extern const char __extern_Equal [] = "Equal";
 
 typedef Binop<plus<int>,       Int,  IntValueAccessor, __extern_Plus>   Plus;
 typedef Binop<minus<int>,      Int,  IntValueAccessor, __extern_Minus>  Minus;
@@ -353,31 +353,49 @@ typedef Binop<less<int>,       Bool, IntValueAccessor, __extern_Less>   Less;
 typedef Binop<equal_to<int>,   Bool, IntValueAccessor, __extern_Equal>  Equal;
 
 //======================================================================
+// @todo: undef them???
+#define _Bool	new Bool
+#define _Int	new Int
+#define _Var	new Var
+#define _Plus	new Plus
+#define _Minus	new Minus
+#define _Times	new Times
+#define _Divide new Divide
+#define _Less	new Less
+#define _Equal	new Equal
+#define _While	new While
+#define _If	new If
+#define _Skip	new Skip
+#define _Seq	new Seq
+#define _While	new While
+#define _Assign new Assign
+
+//======================================================================
 int main()
 {
    try {
       vector<Context> c;
       PCExp
 	 // 1
-	 e(new Seq(new While(new Less(new Var("d"), new Int(5)),
-			     new Assign("d", new Int(10))),
-		   new Var("d")));
+	 e(_Seq(_While(_Less(_Var("d"), _Int(5)),
+	 	       _Assign("d", _Int(11))),
+	 	_Var("d")));
 	 // 2
-	 // e(new Seq(new Less(new Var("c"),
-	 // 		    new Times(new Minus(new Var("a"),
-	 // 					new Int(10)),
-	 // 			      new Plus(new Var("b"),
-	 // 				       new Int(1)))),
-	 // 	   new Seq(new Assign("d", new Int(10)),
-	 // 		   new Var("d"))));
+	 // e(_Seq(_Less(_Var("c"),
+	 // 	      _Times(_Minus(_Var("a"),
+	 // 			    _Int(10)),
+	 // 		     _Plus(_Var("b"),
+	 // 			   _Int(1)))),
+	 // 	_Seq(_Assign("d", _Int(10)),
+	 // 	     _Var("d"))));
 
-      c.push_back(Context("a", new Int(12)));
-      c.push_back(Context("b", new Int(31)));
-      c.push_back(Context("c", new If(new Less(new Var("a"),
-					       new Var("b")),
-				      new Int(444),
-				      new Int(4))));
-      c.push_back(Context("d", new Int(0)));
+      c.push_back(Context("a", _Int(12)));
+      c.push_back(Context("b", _Int(31)));
+      c.push_back(Context("c", _If(_Less(_Var("a"),
+					 _Var("b")),
+				   _Int(444),
+				   _Int(4))));
+      c.push_back(Context("d", _Int(0)));
 
       e->print(); cout << "\n";
 
@@ -387,7 +405,7 @@ int main()
       }
 
       for (; !e->isSimplistic(); e = e->eval(c)) {
-	 cout << ":::::"; e->print(); cout << "\n";
+	 cout << "===> "; e->print(); cout << "\n";
       }
       e->print(); cout << "\n";
 
