@@ -7,7 +7,7 @@ UNAME=$(shell uname)
 ifeq ($(UNAME), Darwin)
 IFLAGS=-I /opt/local/include
 else
-IFLAGS=-I /path/to/my/includes/where/boost/lives
+IFLAGS=
 endif
 
 
