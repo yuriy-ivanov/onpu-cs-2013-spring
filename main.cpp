@@ -138,6 +138,8 @@ class Binop : public Exp {
       > BinopConstraints;
    BOOST_STATIC_ASSERT((oo::mpl::has_key<BinopConstraints,
 			pair<Operation, RetType> >::value));
+
+   typedef typename ValueAccessor::Type VAType;
    ValueAccessor va;
    Operation op;
    PCExp e1_;
@@ -154,7 +156,7 @@ public:
 	 return PCExp(new RetType(op(va(e1_.get()), va(e2_.get()))));
 
       if (e1_->isSimplistic())
-	 return PCExp(new Binop(PCExp(new Int(va(e1_.get()))), e2_->eval(c)));
+	 return PCExp(new Binop(PCExp(new VAType(va(e1_.get()))), e2_->eval(c)));
 
       return PCExp(new Binop(e1_->eval(c), e2_));
    }
@@ -313,6 +315,7 @@ public:
 
 //======================================================================
 struct IntValueAccessor { // @todo: bind it???
+   typedef Int Type;
    int operator()(const Exp* e) const { return e->getInt(); }
 };
 
